@@ -1,0 +1,182 @@
+<h1>Wikipedia Search</h1>
+<h3>Contributors:</h3>
+<ul>
+<li>Debjyoti Paul</li>
+<li>Zinnia Mukherjee</li>
+</ul>
+<h2>Modules or Structure:</h2>
+<h3>OFFLINE PART:</h3>
+<h4>a) Parsing of Wikipedia Data</h4>
+<ul>
+<li>For our initial dataset, we have a list of xml files, each file corresponding to a wikipedia page.</li>
+<li>We have used the <a href="https://github.com/bwbaugh/wikipedia-extractor.git">Wikiextractor</a> module and <a href="http://www.crummy.com/software/BeautifulSoup/bs4/doc/">BeautifulSoup</a> library of python to parse the dump of wikipedia xml files and extract links and page content.</li>
+<li>On the extracted page content, we have filtered out the stop words whose set is defined using the <a href="http://www.nltk.org/api/nltk.corpus.html">nltk corpus</a> for "english" language.</li>
+<li>After removing stop words, we have applied a lemmatization of word token using the <a href="http://www.nltk.org/api/nltk.stem.html">nltk</a> WordNetLemmatizer library.</li>
+<li>Finally this module produces the following list of output files
+<ul>
+<li><strong>pageID.csv</strong> : Each line of this file contains a unique file ID and  the corresponding page title of it.</li>
+<li><strong>pageLinks.csv</strong> : Each line of this file contains an entry for a page. The first element denotes the page ID and the successive elements denote the pageIDs of the outgoing links from this page.</li>
+<li><strong>pageContent.csv</strong> : Each line of this file contains the pageID and the corresponding page content.</li>
+<li><strong>transitionMatrix.txt</strong> : The file is basically the transition matrix required for computing page rank. Each line contains the row number(outgoing page ID), col number (current page ID) and the probability of going from the current page to the outgoing page.</li>
+<li><strong>vector.txt</strong> : This file contains the file ID(the row number in the vector) and the probability of being in the file, which is initially 1/number of pages.</li>
+</ul>
+</li>
+</ul>
+<h4>b) Page Rank Computation</h4>
+<ul>
+<li>The page rank algorithm has been followed from <a href="http://infolab.stanford.edu/~ullman/mmds/ch5.pdf">this book.</a></li>
+<li>For the matrix vector multiplication of the transition matrix and the vector, we have implemented the block matrix vector operation.</li>
+<li>In order to avoid dead ends and spider traps, we have applied taxation at each step. At each step, a random surfer has a probability of beta to follow an out link from that page and a probability of 1-beta to transport to transport to any other random page.</li>
+<li>The matrix vector operation is carried until convergence. Convergence happens when the average of the absolute difference of the values at each position of the two vectors is less than <code>1*10^-6</code>. We carry this repetition for <code>50</code> iterations at most.</li>
+<li>The final vector is the page rank vector. The following list shows the top <code>10</code> ranked pages.</li>
+</ul>
+<pre><code>RESULT
+
+Page Rank   Page ID     Page Title
+    0       56730       "World War II" 
+    1       6437        Latin 
+    2       44850       Julian calendar
+    4       32954       "United Kingdom"
+    5       47722       "Roman numerals"
+    6       19485       "Soviet Union"
+    7       38111       Europe 
+    8       20778       Germany 
+    9       23339       Italy 
+    10      58905       "Greek language"
+</code></pre>
+<h4>c) Term-Document Relevance</h4>
+<ul>
+<li>Since we are dealing with query instead of finding pairwise doc-doc relevance we found term-document relevance with Latent Semantic Analysis will be a realistic approach.</li>
+<li>We implemented <code>Term-Document Matrix (TDM)</code> with <code>TF-IDF</code> values in the following manner.
+<ul>
+<li>We have used same formula given in <a href="https://en.wikipedia.org/wiki/Tf%E2%80%93idf">wikipedia tf-idf</a></li>
+<li>Calculated term frequency for each word in each document</li>
+<li>We have considered tens of thousands of most frequent words (used 30,000 words for demo purpose)</li>
+<li>Calculated <code>tf</code> based on the formula given</li>
+<li>Calculated <code>idf</code> for each word in the corpus</li>
+<li>Calculated <code>tf * idf</code></li>
+<li>Now <code>tf-idf</code> TDM is ready</li>
+</ul>
+</li>
+<li>Having TDM in hand our next approach is to perform <code>Latent Semantic Analysis</code> (<a href="https://en.wikipedia.org/wiki/Latent_semantic_analysis">LSA</a>)</li>
+<li>For LSA we have to perform <code>Singular Value Decomposition</code> (<a href="https://en.wikipedia.org/wiki/SVD">SVD</a>) to yield three basic components for analysis</li>
+<li>Since our TDM Matrix is not so dense it is good to use <code>Sparse SVD</code> technique where <code>SVD</code> is performed on sparse matrix. We have used <a href="https://pypi.python.org/pypi/sparsesvd/">sparsesvd</a>  to find the following components :
+<ul>
+<li><strong><code>U</code></strong> : <code>Document-Feature</code> Matrix</li>
+<li><strong><code>S</code></strong> : <code>Feature-Feature</code> Diagonal Matrix</li>
+<li><strong><code>V</code></strong> : <code>Feature-Word</code> Matrix</li>
+</ul>
+</li>
+<li>This module stores <code>U, S</code> and <code>V</code> in pickle format in the output directory which is used by Online Query Module.</li>
+</ul>
+<h3>ONLINE PART:</h3>
+<h4>Query Module:</h4>
+<h6>Given a query it finds specified number of documents relevant to that query.</h6>
+<ul>
+<li>Reads <code>U, S</code> and <code>V</code> from output directory</li>
+<li>Read the page rank computed by the Page Rank module</li>
+<li>Finds all rows from <code>V</code> corresponding to each word from given query and creates <code>V'</code></li>
+<li>Calculates <code>U*S*V'</code> and sort on the sum of each row which is basically the relevance score of each document for the given query.</li>
+<li>Consider first few documents (default 25) and sort based on page rank.</li>
+<li>Output the result</li>
+</ul>
+<h2>Usage help</h2>
+<h3>Page Rank Computation</h3>
+<h4>(<a href="infolab.stanford.edu/~ullman/mmds/ch5.pdf">Suggested reading</a>)</h4>
+<pre><code>usage: 
+spark-submit PageRankCompute.py --mat &lt;transitionMatrix&gt; --vec &lt;documenteVector&gt; [ -e &lt;epsilon value&gt; -b &lt;beta value&gt;-s &lt;group_size&gt; -m &lt;executor_memory in GB&gt; -p &lt;parallelism&gt;]
+
+[-h] --mat MAT --vec VEC [-s SIZE] [-e EPSILON] [-b BETA] [-m MEMORY] [-p PROC] 
+
+Page Rank Calculator
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --mat MAT             Input Transition Matrix file.
+  --vec VEC             Input Vector file.
+  -s SIZE, --size SIZE  Each Group size.. default 200
+  -e EPSILON, --epsilon EPSILON
+                        epsilon value .. default: 0.000001
+  -b BETA, --beta BETA  beta value .. default: 0.85
+  -m MEMORY, --memory MEMORY
+                        Spark Executor Memory in GB .. default: 4GB
+  -p PROC, --proc PROC  number of CPU cores .. default: 4
+</code></pre>
+<p>Given a transition Matrix and Document vector it computes page rank of each documents</p>
+<h3>Term-document Similarity with <a href="https://en.wikipedia.org/wiki/Tf%E2%80%93idf">TF-IDF</a>, <a href="https://en.wikipedia.org/wiki/Singular_value_decomposition">SVD</a> for <a href="https://en.wikipedia.org/wiki/Latent_semantic_analysis">LSA</a></h3>
+<pre><code class="language-">usage: 
+spark-submit term_document.py  -i &lt;inputDirectory&gt; -o &lt;outputDirectory&gt; -n &lt;vocab_size&gt; -r &lt; all | lsa | query &gt; -w &lt;word&gt; [  -m &lt;executor_memory in GB&gt; -p &lt;parallelism&gt;] 
+
+ [-h] -i DIR -o OUTFILE [-n SIZE] [-r RUN] -w WORD [-c COUNT] [-m MEMORY] [-p PROC] 
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -i DIR, --dir DIR     Input Directory where pageContent.csv pageRank.csv and pageID.csv  is present
+  -o OUTFILE, --outfile OUTFILE
+                        Output Directory where it stores all the meta information and later used by query
+  -n SIZE, --size SIZE  Specify your Dictoionary/Vocab size
+  -r RUN, --run RUN     Specify which section of program to run &lt;tdm | t | lsa | l | query | q &gt; 
+                        Step 1: TDM: Constructs Term-Document Matrix 
+                        Step 2: LSA: Construct SVD Components for LSA 
+                        Step 3: Query
+  -w WORD, --word WORD  Enter your search string
+  -c COUNT, --count COUNT
+                        Specify number of documents to show as output.. default: 25
+  -m MEMORY, --memory MEMORY
+                        Spark Executor Memory in GB .. default: 4GB
+  -p PROC, --proc PROC  number of CPU cores .. default: 4
+</code></pre>
+<p>Example:</p>
+<pre><code>spark-submit --master yarn --num-executors 10 --driver-memory 6g --executor-memory 8g --executor-cores 1 --queue general term_document_cluster.py -i hdfs://elephant/user/u0992708/wikidateset -n 40000 -r query -o ~/output -w "sample query" -c 30
+</code></pre>
+<h3>Few Queries:</h3>
+<ul>
+<li>Command:</li>
+</ul>
+<pre><code>$ spark-submit --master yarn --num-executors 10 --driver-memory 6g --executor-memory 8g --executor-cores 1 --queue general term_document_cluster.py -i hdfs://elephant/user/u0992708/wikidataset -n 30000 -r q -o ~/final_result_all -w "utah" -c 10
+</code></pre>
+<ul>
+<li>Result:</li>
+</ul>
+<pre><code>###################################################################################################################
+ Query :  UTAH
+###################################################################################################################
+|   PAGE RANK   |         TITLE                                         |    RELEVANCE INDEX    
+###################################################################################################################
+|        13559  |   "History of The Church of Jesus Christ of Latter-day Saints"    |       1.266137    
+|        22528  |   "First Transcontinental Railroad"                   |       2.521217    
+|        25823  |   "Missouri River"                                    |       1.434554    
+|        28109  |   "Salt Lake City"                                    |       1.296667    
+|        28149  |   Montana                                             |       1.555194    
+|        28181  |   Utah                                                |       2.049825    
+|        37233  |   Colorado                                            |       1.680753    
+|        37271  |   "Oregon Trail"                                      |       3.115999    
+|        53561  |   "Dallas Mavericks"                                  |       1.361094    
+|        55546  |   "Utah Jazz"                                         |       1.318745    
+###################################################################################################################
+</code></pre>
+<ul>
+<li>Command:</li>
+</ul>
+<pre><code>spark-submit --master yarn --num-executors 10 --driver-memory 6g --executor-memory 8g --executor-cores 1 --queue general term_document_cluster.py -i hdfs://elephant/user/u0992708/wikidataset -n 30000 -r q -o ~/final_result_all -w "solar system" -c 10
+</code></pre>
+<ul>
+<li>Result:</li>
+</ul>
+<pre><code>###################################################################################################################
+ Query :  SOLAR SYSTEM
+###################################################################################################################
+|   PAGE RANK   |         TITLE                                         |    RELEVANCE INDEX    
+###################################################################################################################
+|         3384  |   Astronomy                                           |       5.595503    
+|        10719  |   Jupiter                                             |       6.218736    
+|        11883  |   "Operating system"                                  |       5.558648    
+|        17118  |   "Interplanetary spaceflight"                        |       5.750967    
+|        26127  |   Exoplanet                                           |       6.554704    
+|        29156  |   "Galileo (spacecraft)"                              |       6.049845    
+|        35281  |   Planet                                              |       6.417857    
+|        45236  |   "Solar System"                                      |       6.610066    
+|        45325  |   "Space colonization"                                |       5.645838    
+|        55147  |   Sun                                                 |       5.610186    
+###################################################################################################################
+</code></pre>
