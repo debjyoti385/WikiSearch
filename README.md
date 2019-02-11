@@ -2,8 +2,9 @@
 # Wikipedia Search
 
 ### Contributors: 
-- Zinnia Mukherjee
 - Debjyoti Paul
+- Zinnia Mukherjee
+
 
 ## Modules or Structure:
 ###   OFFLINE PART:
